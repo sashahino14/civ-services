@@ -1,0 +1,88 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body, html { height: 100%; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; background: #f4f4f4; }
+#app { display: flex; flex-direction: column; height: 100%; position: relative; }
+#search-bar {
+  display: flex; padding: 8px; background: #fff; box-shadow: 0 1px 8px rgba(0,0,0,0.1);
+  z-index: 1000;
+}
+#search-input { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 8px 0 0 8px; font-size: 16px; outline: none; }
+#search-btn { padding: 12px 18px; background: #2c3e50; color: white; border: none; border-radius: 0 8px 8px 0; cursor: pointer; transition: 0.2s; }
+#search-btn:active { background: #1a2632; }
+#quick-buttons {
+  display: flex; overflow-x: auto; padding: 8px 12px; background: #fafafa;
+  border-bottom: 1px solid #ddd; gap: 8px; z-index: 999; scrollbar-width: thin;
+}
+.cat-btn {
+  white-space: nowrap; padding: 8px 16px; border: none; border-radius: 40px;
+  background: #e9ecef; font-size: 14px; font-weight: 500; cursor: pointer;
+  transition: 0.2s; display: flex; align-items: center; gap: 6px;
+}
+.cat-btn i { font-size: 14px; }
+.cat-btn.active { background: #2c3e50; color: white; }
+#map { flex: 1; width: 100%; z-index: 0; background: #c8e0f0; }
+#locate-btn {
+  position: absolute; bottom: 20px; right: 20px; width: 50px; height: 50px;
+  background: white; border-radius: 50%; box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+  display: flex; align-items: center; justify-content: center; font-size: 24px;
+  z-index: 1000; cursor: pointer; user-select: none; transition: 0.2s;
+}
+#locate-btn:active { transform: scale(0.95); background: #f0f0f0; }
+#results-panel {
+  position: absolute; bottom: 0; left: 0; right: 0; max-height: 55%;
+  background: white; border-top: 2px solid #ccc; transform: translateY(100%);
+  transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.4, 1.1); display: flex; flex-direction: column; z-index: 1001;
+  border-radius: 20px 20px 0 0; box-shadow: 0 -4px 12px rgba(0,0,0,0.1);
+}
+#results-panel.open { transform: translateY(0); }
+#panel-header {
+  display: flex; justify-content: space-between; padding: 14px 18px;
+  border-bottom: 1px solid #eee; font-weight: 600; font-size: 16px;
+}
+#close-panel { background: none; border: none; font-size: 22px; cursor: pointer; padding: 0 8px; }
+#results-list { overflow-y: auto; padding: 8px 12px; flex: 1; max-height: 55vh; }
+.result-item {
+  padding: 12px; border-bottom: 1px solid #f0f0f0; cursor: pointer;
+  display: flex; justify-content: space-between; align-items: center;
+  transition: 0.1s;
+}
+.result-item:hover { background: #f5f7fa; }
+.result-distance { color: #2c3e50; font-size: 0.8em; font-weight: 500; margin-left: 8px; }
+.fav-star { cursor: pointer; font-size: 24px; color: #f5b042; transition: 0.1s; width: 32px; text-align: center; }
+.fav-star:active { transform: scale(0.9); }
+#loader-container {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 2000; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px);
+  padding: 12px 24px; border-radius: 40px; display: flex; align-items: center;
+  gap: 12px; pointer-events: none; transition: opacity 0.2s;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+}
+#loader-container.hidden { display: none; }
+.spinner {
+  width: 24px; height: 24px; border: 3px solid rgba(255,255,255,0.3);
+  border-top: 3px solid white; border-radius: 50%; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+#loader-container span { font-size: 15px; font-weight: 500; color: white; letter-spacing: 0.5px; }
+.error-toast {
+  position: fixed; bottom: 80px; left: 16px; right: 16px; background: #dc3545; color: white;
+  padding: 12px; border-radius: 30px; text-align: center; z-index: 2001; font-size: 14px;
+  animation: fadeOut 3s forwards; box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+}
+@keyframes fadeOut { 0% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; visibility: hidden; } }
+
+/* Style développeur */
+#dev-info {
+  text-align: center;
+  font-size: 11px;
+  padding: 12px 8px;
+  color: #6c757d;
+  background-color: #f8f9fa;
+  border-top: 1px solid #dee2e6;
+  margin-top: 8px;
+  font-family: monospace;
+  letter-spacing: 0.3px;
+}
+#dev-info i {
+  margin-right: 6px;
+  color: #2c3e50;
+}

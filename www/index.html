@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>CIV Services - Annuaire proche de vous</title>
+  <!-- Icône de l'application via CDN (favicon + mobile) -->
+  <link rel="icon" type="image/png" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-icon.png">
+  <link rel="apple-touch-icon" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-icon.png">
+  <meta name="theme-color" content="#2c3e50">
+  <!-- CDN Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- CDN Font Awesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" />
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="loader-container" class="hidden">
+  <div class="spinner"></div>
+  <span>Recherche en cours...</span>
+</div>
+<div id="app">
+  <div id="search-bar">
+    <input type="text" id="search-input" placeholder="Ex: pharmacie près de la gare, hôpital Yopougon..." />
+    <button id="search-btn"><i class="fas fa-search"></i></button>
+  </div>
+  <div id="quick-buttons">
+    <button class="cat-btn" data-cat="hospital"><i class="fas fa-hospital"></i> Hôpitaux</button>
+    <button class="cat-btn" data-cat="pharmacy"><i class="fas fa-prescription-bottle-medical"></i> Pharmacies</button>
+    <button class="cat-btn" data-cat="school"><i class="fas fa-school"></i> Écoles</button>
+    <button class="cat-btn" data-cat="fuel"><i class="fas fa-gas-pump"></i> Essence</button>
+    <button class="cat-btn" data-cat="market"><i class="fas fa-shopping-cart"></i> Commerces</button>
+    <button class="cat-btn" data-cat="public"><i class="fas fa-landmark"></i> Publics</button>
+  </div>
+  <div id="map"></div>
+  <div id="locate-btn"><i class="fas fa-location-crosshairs"></i></div>
+  <div id="results-panel">
+    <div id="panel-header">
+      <span>Résultats à proximité</span>
+      <button id="close-panel"><i class="fas fa-times"></i></button>
+    </div>
+    <div id="results-list"></div>
+    <div id="dev-info">
+      <i class="fas fa-code-branch"></i> Développé par <strong>Hino Coding Lab</strong> | v1.0 | Services publics & commerces CI
+    </div>
+  </div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
