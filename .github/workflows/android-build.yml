@@ -1,4 +1,4 @@
-name: Build Android APK (ARMv7)
+name: Build Android APK (32-bit & 64-bit)
 
 on:
   push:
@@ -13,15 +13,15 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4 # Update v3 -> v4
+        uses: actions/setup-node@v4
         with:
-          node-version: 20 # Utilise la version 20 pour plus de stabilité
+          node-version: 20
 
       - name: Install dependencies
-        run: npm install # 'npm ci' nécessite un package-lock.json parfait
+        run: npm install
 
       - name: Setup Java 17
-        uses: actions/setup-java@v4 # Update v3 -> v4
+        uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
@@ -34,25 +34,30 @@ jobs:
 
       - name: Configure Android Permissions
         run: |
-          # Ajout des permissions de localisation et de stockage (MANAGE_EXTERNAL_STORAGE pour le scan)
           cd android/app/src/main
           sed -i '/<manifest/a \    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />' AndroidManifest.xml
-          # Activation du Legacy Storage
           sed -i '/<application/s/<application/<application android:requestLegacyExternalStorage="true"/' AndroidManifest.xml
 
-      - name: Configure ABI splits (ARMv7 32-bit only)
+      - name: Configure ABI splits for 32-bit & 64-bit
         run: |
           cd android
-          sed -i '/android {/a \    splits {\n        abi {\n            enable true\n            reset()\n            include "armeabi-v7a"\n            universalApk false\n        }\n    }' app/build.gradle
+          # Modifie la configuration pour inclure les deux architectures
+          sed -i '/android {/a \    splits {\n        abi {\n            enable true\n            reset()\n            include "armeabi-v7a", "arm64-v8a"\n            universalApk false\n        }\n    }' app/build.gradle
 
-      - name: Build APK
+      - name: Build APKs
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4 # LA CORRECTION CRITIQUE
+      - name: Upload 32-bit APK (armeabi-v7a)
+        uses: actions/upload-artifact@v4
         with:
-          name: WhatsStat-Cyber-32bit-Build-${{ github.run_number }}
+          name: CIVServices-32bit-${{ github.run_number }}
           path: android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk
+
+      - name: Upload 64-bit APK (arm64-v8a)
+        uses: actions/upload-artifact@v4
+        with:
+          name: CIVServices-64bit-${{ github.run_number }}
+          path: android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk

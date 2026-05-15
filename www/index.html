@@ -4,13 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>CIV Services - Annuaire proche de vous</title>
-  <!-- Icône de l'application via CDN (favicon + mobile) -->
-  <link rel="icon" type="image/png" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-icon.png">
-  <link rel="apple-touch-icon" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-icon.png">
+
+  <link rel="icon" type="image/png" href="assets/logo.png">
+  <link rel="apple-touch-icon" href="assets/logo.png">
   <meta name="theme-color" content="#2c3e50">
-  <!-- CDN Leaflet -->
+
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <!-- CDN Font Awesome -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" />
   <link rel="stylesheet" href="style.css">
 </head>
@@ -34,6 +33,29 @@
   </div>
   <div id="map"></div>
   <div id="locate-btn"><i class="fas fa-location-crosshairs"></i></div>
+  <!-- Bouton basculement satellite -->
+<div id="satellite-btn" class="floating-btn satellite">
+  <i class="fas fa-globe"></i>
+</div>
+  <button id="favorites-btn" class="floating-btn" style="background:#f5b042; bottom:200px;">
+  <i class="fas fa-star"></i>
+</button>
+<div id="favorites-panel" class="side-panel">
+  <div class="panel-header">
+    <span>⭐ Mes favoris</span>
+    <button id="close-favorites">&times;</button>
+  </div>
+  <div id="favorites-list"></div>
+</div>
+  
+  <!-- Boutons flottants -->
+  <div id="urgence-btn" class="floating-btn urgence">
+    <i class="fas fa-phone-alt"></i>
+  </div>
+  <div id="signalement-btn" class="floating-btn signalement">
+    <i class="fas fa-exclamation-triangle"></i>
+  </div>
+
   <div id="results-panel">
     <div id="panel-header">
       <span>Résultats à proximité</span>
@@ -45,6 +67,45 @@
     </div>
   </div>
 </div>
+
+<!-- Modal Urgences -->
+<div id="urgence-modal" class="modal">
+  <div class="modal-content">
+    <span class="close-modal">&times;</span>
+    <h3><i class="fas fa-ambulance"></i> Numéros d'urgence</h3>
+    <ul class="urgence-list">
+      <li><i class="fas fa-fire-extinguisher"></i> Sapeurs Pompiers : <a href="tel:18">18</a></li>
+      <li><i class="fas fa-shield-alt"></i> Police Nationale : <a href="tel:17">17</a></li>
+      <li><i class="fas fa-truck-medical"></i> SAMU : <a href="tel:15">15</a></li>
+      <li><i class="fas fa-gendarmerie"></i> Gendarmerie : <a href="tel:101">101</a></li>
+    </ul>
+  </div>
+</div>
+
+<!-- Modal Signalement -->
+<div id="signalement-modal" class="modal">
+  <div class="modal-content">
+    <span class="close-modal">&times;</span>
+    <h3><i class="fas fa-flag"></i> Signaler un problème</h3>
+    <form id="signalement-form">
+      <label>Type d'incident :</label>
+      <select id="incident-type" required>
+        <option value="incendie">Incendie</option>
+        <option value="accident">Accident de la route</option>
+        <option value="incivilite">Incitoyenneté / dégradation</option>
+        <option value="route">Nid-de-poule / voirie</option>
+        <option value="autre">Autre</option>
+      </select>
+      <label>Description :</label>
+      <textarea id="description" rows="3" placeholder="Décrivez précisément..." required></textarea>
+      <label>Photo (facultative) :</label>
+      <input type="file" id="photo" accept="image/*">
+      <button type="submit" id="submit-signalement">Envoyer le signalement</button>
+    </form>
+    <div id="signalement-status"></div>
+  </div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="app.js"></script>
 </body>

@@ -3,7 +3,7 @@ const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const CACHE_DURATION = 30 * 60 * 1000;
 const DEBOUNCE_DELAY = 500;
-const MAX_BBOX_AREA = 0.5; // degrés² max pour éviter timeout (environ 50 km²)
+const MAX_BBOX_AREA = 0.5;
 
 // ---------- État global ----------
 const state = {
@@ -68,7 +68,7 @@ function haversine(coord1, place) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-// ---------- Ajustement de la bbox pour éviter les timeouts ----------
+// ---------- Ajustement de la bbox ----------
 function adjustBbox(bounds) {
   let south = bounds.getSouth();
   let west = bounds.getWest();
@@ -89,7 +89,7 @@ function adjustBbox(bounds) {
   return [south, west, north, east];
 }
 
-// ---------- Requête Overpass robuste avec User-Agent ----------
+// ---------- Requête Overpass ----------
 async function fetchPlaces(category, bbox) {
   const tagQuery = CATEGORY_TAGS[category];
   if (!tagQuery) return [];
@@ -102,7 +102,6 @@ async function fetchPlaces(category, bbox) {
     return cached.data;
   }
 
-  // Requête simplifiée : uniquement des nodes (plus rapide, moins d'erreurs)
   const query = `[out:json][timeout:15];
 (
   node[${tagQuery}](${bboxStr});
@@ -122,10 +121,8 @@ out body;`;
       signal: controller.signal
     });
     clearTimeout(timeoutId);
-
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const json = await response.json();
-    
     const places = json.elements.map(el => ({
       id: el.id,
       lat: el.lat,
@@ -279,7 +276,6 @@ function locateUser() {
     err => {
       showError("Impossible d'obtenir votre position. Activez la géolocalisation.");
       showLoading(false);
-      // Fallback : centre sur Abidjan
       state.map.setView([5.359952, -4.008256], 13);
       if (!state.activeCategory) {
         state.activeCategory = 'hospital';
@@ -340,8 +336,129 @@ async function handleNaturalSearch(query) {
   searchAroundMap(category, true);
 }
 
-// ---------- Initialisation ----------
+// ---------- Module Urgences ----------
+function initUrgences() {
+  const btnUrgence = document.getElementById('urgence-btn');
+  const modal = document.getElementById('urgence-modal');
+  const closeSpan = modal.querySelector('.close-modal');
+
+  btnUrgence.addEventListener('click', () => {
+    modal.style.display = 'flex';
+  });
+
+  closeSpan.addEventListener('click', () => {
+    modal.style.display = 'none';
+  });
+
+  window.addEventListener('click', (e) => {
+    if (e.target === modal) modal.style.display = 'none';
+  });
+}
+
+// ---------- Module Signalement ----------
+function initSignalement() {
+  const btnSignal = document.getElementById('signalement-btn');
+  const modal = document.getElementById('signalement-modal');
+  const closeSpan = modal.querySelector('.close-modal');
+  const form = document.getElementById('signalement-form');
+  const statusDiv = document.getElementById('signalement-status');
+
+  btnSignal.addEventListener('click', () => {
+    modal.style.display = 'flex';
+  });
+
+  closeSpan.addEventListener('click', () => {
+    modal.style.display = 'none';
+  });
+
+  window.addEventListener('click', (e) => {
+    if (e.target === modal) modal.style.display = 'none';
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const type = document.getElementById('incident-type').value;
+    const description = document.getElementById('description').value;
+    const photoFile = document.getElementById('photo').files[0];
+    
+    let position = null;
+    if (navigator.geolocation) {
+      try {
+        const pos = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
+        });
+        position = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      } catch(e) { console.warn("Géo non dispo"); }
+    }
+
+    let photoBase64 = null;
+    if (photoFile) {
+      photoBase64 = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.readAsDataURL(photoFile);
+      });
+    }
+
+    const signalement = {
+      id: Date.now(),
+      date: new Date().toISOString(),
+      type,
+      description,
+      position,
+      photo: photoBase64,
+      status: 'non traité'
+    };
+
+    let signalements = JSON.parse(localStorage.getItem('civ_signalements') || '[]');
+    signalements.unshift(signalement);
+    localStorage.setItem('civ_signalements', JSON.stringify(signalements));
+
+    statusDiv.innerHTML = '<p style="color:green;">✅ Signalement enregistré. Merci !</p>';
+    form.reset();
+    setTimeout(() => {
+      modal.style.display = 'none';
+      statusDiv.innerHTML = '';
+    }, 2000);
+  });
+}
+
+// ---------- Initialisation principale ----------
 document.addEventListener('DOMContentLoaded', () => {
+  // Dans document.addEventListener('DOMContentLoaded', () => { ... }
+
+state.map = L.map('map', { zoomControl: false }).setView([5.359952, -4.008256], 13);
+L.control.zoom({ position: 'bottomleft' }).addTo(state.map);
+
+// Couches
+const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap',
+  maxZoom: 19
+});
+const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  attribution: 'Tiles &copy; Esri',
+  maxZoom: 19
+});
+osmLayer.addTo(state.map);
+state.markersLayer = L.layerGroup().addTo(state.map);
+
+let isSatellite = false;
+const satBtn = document.getElementById('satellite-btn');
+function toggleSatellite() {
+  if (isSatellite) {
+    state.map.removeLayer(satelliteLayer);
+    osmLayer.addTo(state.map);
+    satBtn.classList.remove('active');
+  } else {
+    state.map.removeLayer(osmLayer);
+    satelliteLayer.addTo(state.map);
+    satBtn.classList.add('active');
+  }
+  isSatellite = !isSatellite;
+}
+satBtn.addEventListener('click', toggleSatellite);
+
+// Le reste du code (locateUser, search, etc.) inchangé...
   console.log("🚀 CIV Services - Développé par Hino Coding Lab | Version 1.0 | https://hinolab.com");
   state.map = L.map('map', { zoomControl: false }).setView([5.359952, -4.008256], 13);
   L.control.zoom({ position: 'bottomleft' }).addTo(state.map);
@@ -350,6 +467,7 @@ document.addEventListener('DOMContentLoaded', () => {
     maxZoom: 19
   }).addTo(state.map);
   state.markersLayer = L.layerGroup().addTo(state.map);
+  
 
   document.getElementById('locate-btn').addEventListener('click', locateUser);
   document.getElementById('search-btn').addEventListener('click', () => {
@@ -378,6 +496,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (state.activeCategory) debouncedSearch(state.activeCategory);
   });
 
-  // Lancer la localisation au démarrage
+  // Initialisation des nouveaux modules
+  initUrgences();
+  initSignalement();
+
   locateUser();
 });
