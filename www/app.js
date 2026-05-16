@@ -1,56 +1,55 @@
-// ---------- Configuration ----------
+// ---------- Importations des modules ----------
+import { initFavorites } from './favorites.js';
+import { initShare } from './share.js';
+import { initSignalement } from './signalement.js';
+import { initUrgences } from './urgences.js';
+import { initVoiceSearch } from './voice-search.js';
+import { showRoute } from './routing.js';
+
+// ---------- Configuration des APIs ----------
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
-const CACHE_DURATION = 30 * 60 * 1000;
-const DEBOUNCE_DELAY = 500;
-const MAX_BBOX_AREA = 0.5;
+const MAX_RESULTS = 40;
+const CACHE_DURATION = 30 * 60 * 1000; // Cache de 30 minutes
 
-// ---------- État global ----------
-const state = {
+// ---------- État global de l'application ----------
+export const state = {
   map: null,
   markersLayer: null,
   currentPos: null,
   activeCategory: null,
   results: [],
   favs: JSON.parse(localStorage.getItem('civ_favs') || '[]'),
-  history: JSON.parse(localStorage.getItem('civ_history') || '[]'),
   cache: JSON.parse(localStorage.getItem('civ_cache') || '{}'),
-  lastFetchKey: null,
   isFetching: false
 };
 
-// ---------- Mapping catégories ----------
+// ---------- Mappage catégories OpenStreetMap ----------
 const CATEGORY_TAGS = {
   hospital: 'amenity=hospital',
   pharmacy: 'amenity=pharmacy',
   school: 'amenity=school',
   fuel: 'amenity=fuel',
-  market: 'shop~".*"',
-  public: 'amenity=public_building'
-};
-const CATEGORY_NAMES = {
-  hospital: 'Hôpital', pharmacy: 'Pharmacie', school: 'École',
-  fuel: 'Station essence', market: 'Commerce', public: 'Service public'
+  market: 'shop~".*"', // Récupère tous les types de commerces
+  public: '(amenity=public_building or office=government)'
 };
 
-// ---------- Utilitaires UI ----------
+const CATEGORY_NAMES = {
+  hospital: 'Hôpital / Centre de santé',
+  pharmacy: 'Pharmacie',
+  school: 'Établissement scolaire',
+  fuel: 'Station-service',
+  market: 'Commerce / Marché',
+  public: 'Administration public'
+};
+
+// ---------- Utilitaires de l'interface utilisateur ----------
 function showLoading(show) {
   const loader = document.getElementById('loader-container');
-  if (show) loader.classList.remove('hidden');
-  else loader.classList.add('hidden');
-  state.isFetching = show;
-}
-
-function showError(msg, isWarning = false) {
-  const existing = document.querySelector('.error-toast');
-  if (existing) existing.remove();
-  const toast = document.createElement('div');
-  toast.className = 'error-toast';
-  toast.style.backgroundColor = isWarning ? '#f0ad4e' : '#dc3545';
-  toast.innerText = msg;
-  document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 4000);
-  console.error(msg);
+  if (loader) {
+    if (show) loader.classList.remove('hidden');
+    else loader.classList.add('hidden');
+  }
 }
 
 function escapeHtml(text) {
@@ -58,433 +57,76 @@ function escapeHtml(text) {
   const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
   return text.replace(/[&<>"']/g, m => map[m]);
 }
+// Rendre escapeHtml accessible aux autres modules distants
+window.escapeHtml = escapeHtml;
 
-function haversine(coord1, place) {
-  if (!coord1) return null;
-  const R = 6371;
-  const dLat = (place.lat - coord1.lat) * Math.PI / 180;
-  const dLon = (place.lon - coord1.lng) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2 + Math.cos(coord1.lat * Math.PI/180) * Math.cos(place.lat * Math.PI/180) * Math.sin(dLon/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-}
-
-// ---------- Ajustement de la bbox ----------
-function adjustBbox(bounds) {
-  let south = bounds.getSouth();
-  let west = bounds.getWest();
-  let north = bounds.getNorth();
-  let east = bounds.getEast();
-  let area = (north - south) * (east - west);
-  if (area > MAX_BBOX_AREA) {
-    const factor = Math.sqrt(MAX_BBOX_AREA / area);
-    const latCenter = (south + north) / 2;
-    const lngCenter = (west + east) / 2;
-    const latDelta = (north - south) * factor / 2;
-    const lngDelta = (east - west) * factor / 2;
-    south = latCenter - latDelta;
-    north = latCenter + latDelta;
-    west = lngCenter - lngDelta;
-    east = lngCenter + lngDelta;
-  }
-  return [south, west, north, east];
-}
-
-// ---------- Requête Overpass ----------
-async function fetchPlaces(category, bbox) {
-  const tagQuery = CATEGORY_TAGS[category];
-  if (!tagQuery) return [];
-  const [south, west, north, east] = bbox;
-  const bboxStr = `${south},${west},${north},${east}`;
-  const cacheKey = `${category}_${bboxStr}`;
-  const cached = state.cache[cacheKey];
-  if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
-    console.log('Cache hit');
-    return cached.data;
-  }
-
-  const query = `[out:json][timeout:15];
-(
-  node[${tagQuery}](${bboxStr});
-);
-out body;`;
-
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
-    const response = await fetch(OVERPASS_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'CIVServices/1.0 (https://civservices.ci; contact@civservices.ci)'
-      },
-      body: 'data=' + encodeURIComponent(query),
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const json = await response.json();
-    const places = json.elements.map(el => ({
-      id: el.id,
-      lat: el.lat,
-      lon: el.lon,
-      tags: el.tags || {},
-      type: el.type
-    })).filter(p => p.lat && p.lon).slice(0, 50);
-
-    state.cache[cacheKey] = { data: places, timestamp: Date.now() };
-    localStorage.setItem('civ_cache', JSON.stringify(state.cache));
-    return places;
-  } catch (err) {
-    console.error('Overpass error:', err);
-    if (err.name === 'AbortError') {
-      showError('Le service met trop de temps à répondre. Réduisez la zone visible.');
-    } else if (err.message.includes('HTTP 429')) {
-      showError('Trop de requêtes, attendez quelques secondes.');
-    } else {
-      showError('Erreur de connexion au service Overpass. Vérifiez votre connexion internet.');
-    }
-    return [];
-  }
-}
-
-// ---------- Marqueurs ----------
-function updateMarkers(places) {
-  state.markersLayer.clearLayers();
-  places.forEach(place => {
-    const name = place.tags.name || place.tags.amenity || place.tags.shop || 'Sans nom';
-    const distance = state.currentPos ? haversine(state.currentPos, place) : null;
-    const distHtml = distance ? `<br><small>📏 ${distance.toFixed(1)} km</small>` : '';
-    const popupContent = `
-      <b>${escapeHtml(name)}</b><br>
-      <small>${CATEGORY_NAMES[state.activeCategory] || ''}</small>
-      ${distHtml}<br>
-      <button onclick="window.openDirections(${place.lat},${place.lon})" style="margin-top:6px; padding:4px 10px; background:#2c3e50; color:white; border:none; border-radius:20px; cursor:pointer;">🗺️ Itinéraire</button>
-    `;
-    const marker = L.marker([place.lat, place.lon]).bindPopup(popupContent);
-    marker.addTo(state.markersLayer);
-  });
-}
-
-window.openDirections = (lat, lon) => {
-  window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`, '_blank');
-};
-
-// ---------- Panneau résultats ----------
-function displayResults(places) {
-  const list = document.getElementById('results-list');
-  list.innerHTML = '';
-  if (!places.length) {
-    list.innerHTML = '<p style="padding:16px; text-align:center;">Aucun résultat trouvé dans cette zone.</p>';
-    document.getElementById('results-panel').classList.add('open');
-    return;
-  }
-  state.results = places;
-  places.forEach(place => {
-    const name = place.tags.name || place.tags.amenity || place.tags.shop || 'Sans nom';
-    const dist = state.currentPos ? haversine(state.currentPos, place) : null;
-    const distStr = dist ? `${dist.toFixed(1)} km` : '';
-    const div = document.createElement('div');
-    div.className = 'result-item';
-    div.innerHTML = `
-      <div style="flex:1">
-        <strong>${escapeHtml(name)}</strong><br>
-        <small>${CATEGORY_NAMES[state.activeCategory] || ''}</small>
-        ${distStr ? `<span class="result-distance">${distStr}</span>` : ''}
-      </div>
-      <span class="fav-star" data-id="${place.id}" data-lat="${place.lat}" data-lon="${place.lon}" data-name="${escapeHtml(name)}">☆</span>
-    `;
-    const starSpan = div.querySelector('.fav-star');
-    if (state.favs.some(f => f.id === String(place.id))) starSpan.innerText = '★';
-    else starSpan.innerText = '☆';
-
-    div.addEventListener('click', (e) => {
-      if (e.target.classList.contains('fav-star')) return;
-      state.map.setView([place.lat, place.lon], 17);
-      state.markersLayer.eachLayer(m => {
-        const latlng = m.getLatLng();
-        if (Math.abs(latlng.lat - place.lat) < 0.0001 && Math.abs(latlng.lng - place.lon) < 0.0001)
-          m.openPopup();
-      });
-    });
-
-    starSpan.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const id = String(place.id);
-      const idx = state.favs.findIndex(f => f.id === id);
-      if (idx !== -1) state.favs.splice(idx, 1);
-      else state.favs.push({ id, lat: place.lat, lon: place.lon, name });
-      localStorage.setItem('civ_favs', JSON.stringify(state.favs));
-      starSpan.innerText = state.favs.some(f => f.id === id) ? '★' : '☆';
-    });
-    list.appendChild(div);
-  });
-  document.getElementById('results-panel').classList.add('open');
-  addToHistory(state.activeCategory);
-}
-
-function addToHistory(category) {
-  state.history.unshift({ category, timestamp: Date.now() });
-  if (state.history.length > 20) state.history.pop();
-  localStorage.setItem('civ_history', JSON.stringify(state.history));
-}
-
-// ---------- Recherche principale ----------
-async function searchAroundMap(category, force = false) {
-  if (!state.map || state.isFetching) return;
-  const bounds = state.map.getBounds();
-  const adjustedBbox = adjustBbox(bounds);
-  const fetchKey = `${category}_${adjustedBbox.join(',')}`;
-  if (!force && state.lastFetchKey === fetchKey) return;
-  state.lastFetchKey = fetchKey;
-  state.activeCategory = category;
-  showLoading(true);
-  const places = await fetchPlaces(category, adjustedBbox);
-  showLoading(false);
-  displayResults(places);
-  updateMarkers(places);
-  if (places.length === 0) {
-    showError('Aucun service trouvé dans cette zone. Essayez de zoomer ou déplacer la carte.', true);
-  }
-}
-
-const debouncedSearch = (() => {
-  let timer;
-  return (category) => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => searchAroundMap(category), DEBOUNCE_DELAY);
-  };
-})();
-
-// ---------- Géolocalisation ----------
-function locateUser() {
-  if (!navigator.geolocation) {
-    showError("Géolocalisation non supportée par votre appareil");
-    return;
-  }
-  showLoading(true);
-  navigator.geolocation.getCurrentPosition(
-    pos => {
-      state.currentPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      state.map.setView([state.currentPos.lat, state.currentPos.lng], 15);
-      if (!state.activeCategory) {
-        state.activeCategory = 'hospital';
-        document.querySelector('[data-cat="hospital"]').classList.add('active');
-      }
-      searchAroundMap(state.activeCategory, true);
-      showLoading(false);
-    },
-    err => {
-      showError("Impossible d'obtenir votre position. Activez la géolocalisation.");
-      showLoading(false);
-      state.map.setView([5.359952, -4.008256], 13);
-      if (!state.activeCategory) {
-        state.activeCategory = 'hospital';
-        document.querySelector('[data-cat="hospital"]').classList.add('active');
-        searchAroundMap('hospital', true);
-      }
-    },
-    { enableHighAccuracy: true, timeout: 10000 }
-  );
-}
-
-// ---------- Recherche naturelle ----------
-async function handleNaturalSearch(query) {
-  const q = query.toLowerCase().trim();
-  let category = null;
-  let locationStr = '';
-  const catPatterns = [
-    { regex: /pharmacie/i, cat: 'pharmacy' },
-    { regex: /hôpital|hopital|centre de santé/i, cat: 'hospital' },
-    { regex: /station essence|essence|fuel/i, cat: 'fuel' },
-    { regex: /école|ecole|etablissement/i, cat: 'school' },
-    { regex: /marché|marche|commerce|boutique|supermarché|magasin/i, cat: 'market' },
-    { regex: /mairie|service public|administration|publics/i, cat: 'public' }
-  ];
-  for (const { regex, cat } of catPatterns) {
-    if (regex.test(q)) {
-      category = cat;
-      locationStr = q.replace(regex, '').replace(/proche|près|de|des|à|au|aux|dans|sur/g, '').trim();
-      break;
-    }
-  }
-  if (!category) {
-    showError("Indiquez une catégorie : pharmacie, hôpital, école, essence, commerce, public");
-    return;
-  }
-
-  let center = state.currentPos;
-  if (locationStr && !['proche','ici',''].includes(locationStr)) {
-    try {
-      const resp = await fetch(`${NOMINATIM_URL}?format=json&q=${encodeURIComponent(locationStr + ', Côte d\'Ivoire')}&limit=1`, {
-        headers: { 'User-Agent': 'CIVServices/1.0' }
-      });
-      const data = await resp.json();
-      if (data.length) center = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
-      else showError("Lieu non trouvé, recherche autour de vous", true);
-    } catch(e) { showError("Erreur de géocodage"); }
-  }
-  if (!center) {
-    if (!state.currentPos) await locateUser();
-    center = state.currentPos;
-    if (!center) return;
-  }
-  state.map.setView([center.lat, center.lng], 14);
-  state.activeCategory = category;
-  document.querySelectorAll('.cat-btn').forEach(btn => btn.classList.remove('active'));
-  const activeBtn = document.querySelector(`.cat-btn[data-cat="${category}"]`);
-  if (activeBtn) activeBtn.classList.add('active');
-  searchAroundMap(category, true);
-}
-
-// ---------- Module Urgences ----------
-function initUrgences() {
-  const btnUrgence = document.getElementById('urgence-btn');
-  const modal = document.getElementById('urgence-modal');
-  const closeSpan = modal.querySelector('.close-modal');
-
-  btnUrgence.addEventListener('click', () => {
-    modal.style.display = 'flex';
-  });
-
-  closeSpan.addEventListener('click', () => {
-    modal.style.display = 'none';
-  });
-
-  window.addEventListener('click', (e) => {
-    if (e.target === modal) modal.style.display = 'none';
-  });
-}
-
-// ---------- Module Signalement ----------
-function initSignalement() {
-  const btnSignal = document.getElementById('signalement-btn');
-  const modal = document.getElementById('signalement-modal');
-  const closeSpan = modal.querySelector('.close-modal');
-  const form = document.getElementById('signalement-form');
-  const statusDiv = document.getElementById('signalement-status');
-
-  btnSignal.addEventListener('click', () => {
-    modal.style.display = 'flex';
-  });
-
-  closeSpan.addEventListener('click', () => {
-    modal.style.display = 'none';
-  });
-
-  window.addEventListener('click', (e) => {
-    if (e.target === modal) modal.style.display = 'none';
-  });
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const type = document.getElementById('incident-type').value;
-    const description = document.getElementById('description').value;
-    const photoFile = document.getElementById('photo').files[0];
-    
-    let position = null;
-    if (navigator.geolocation) {
-      try {
-        const pos = await new Promise((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
-        });
-        position = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      } catch(e) { console.warn("Géo non dispo"); }
-    }
-
-    let photoBase64 = null;
-    if (photoFile) {
-      photoBase64 = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result);
-        reader.readAsDataURL(photoFile);
-      });
-    }
-
-    const signalement = {
-      id: Date.now(),
-      date: new Date().toISOString(),
-      type,
-      description,
-      position,
-      photo: photoBase64,
-      status: 'non traité'
-    };
-
-    let signalements = JSON.parse(localStorage.getItem('civ_signalements') || '[]');
-    signalements.unshift(signalement);
-    localStorage.setItem('civ_signalements', JSON.stringify(signalements));
-
-    statusDiv.innerHTML = '<p style="color:green;">✅ Signalement enregistré. Merci !</p>';
-    form.reset();
-    setTimeout(() => {
-      modal.style.display = 'none';
-      statusDiv.innerHTML = '';
-    }, 2000);
-  });
-}
-
-// ---------- Initialisation principale ----------
+// ---------- Initialisation au chargement du DOM ----------
 document.addEventListener('DOMContentLoaded', () => {
-  // Dans document.addEventListener('DOMContentLoaded', () => { ... }
-
-state.map = L.map('map', { zoomControl: false }).setView([5.359952, -4.008256], 13);
-L.control.zoom({ position: 'bottomleft' }).addTo(state.map);
-
-// Couches
-const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '© OpenStreetMap',
-  maxZoom: 19
-});
-const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-  attribution: 'Tiles &copy; Esri',
-  maxZoom: 19
-});
-osmLayer.addTo(state.map);
-state.markersLayer = L.layerGroup().addTo(state.map);
-
-let isSatellite = false;
-const satBtn = document.getElementById('satellite-btn');
-function toggleSatellite() {
-  if (isSatellite) {
-    state.map.removeLayer(satelliteLayer);
-    osmLayer.addTo(state.map);
-    satBtn.classList.remove('active');
-  } else {
-    state.map.removeLayer(osmLayer);
-    satelliteLayer.addTo(state.map);
-    satBtn.classList.add('active');
-  }
-  isSatellite = !isSatellite;
-}
-satBtn.addEventListener('click', toggleSatellite);
-
-// Le reste du code (locateUser, search, etc.) inchangé...
-  console.log("🚀 CIV Services - Développé par Hino Coding Lab | Version 1.0 | https://hinolab.com");
+  // Coordonnées par défaut (Abidjan, Côte d'Ivoire)
   state.map = L.map('map', { zoomControl: false }).setView([5.359952, -4.008256], 13);
+  
+  // Rendre la carte globale pour les modules dépendants (ex: favorites.js)
+  window.map = state.map;
+
+  // Contrôle du zoom positionné en bas à gauche pour laisser la place aux boutons mobiles
   L.control.zoom({ position: 'bottomleft' }).addTo(state.map);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap',
+
+  // Couche standard (Mapnik OpenStreetMap)
+  const standardLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
     maxZoom: 19
   }).addTo(state.map);
-  state.markersLayer = L.layerGroup().addTo(state.map);
-  
 
+  // Couche satellite (Esri World Imagery)
+  const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles © Esri'
+  });
+
+  // Gestion du basculement satellite
+  let isSatellite = false;
+  document.getElementById('satellite-btn').addEventListener('click', () => {
+    if (isSatellite) {
+      state.map.removeLayer(satelliteLayer);
+      standardLayer.addTo(state.map);
+    } else {
+      state.map.removeLayer(standardLayer);
+      satelliteLayer.addTo(state.map);
+    }
+    isSatellite = !isSatellite;
+    document.getElementById('satellite-btn').classList.toggle('active', isSatellite);
+  });
+
+  // Groupe de marqueurs pour les résultats
+  state.markersLayer = L.layerGroup().addTo(state.map);
+
+  // Assignation des écouteurs d'événements principaux
   document.getElementById('locate-btn').addEventListener('click', locateUser);
+  
   document.getElementById('search-btn').addEventListener('click', () => {
     const query = document.getElementById('search-input').value.trim();
     if (query) handleNaturalSearch(query);
   });
+
   document.getElementById('search-input').addEventListener('keypress', e => {
     if (e.key === 'Enter') document.getElementById('search-btn').click();
   });
 
+  // Gestion active des boutons de catégories horizontales
   document.querySelectorAll('.cat-btn').forEach(btn => {
     btn.addEventListener('click', () => {
+      const alreadyActive = btn.classList.contains('active');
       document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      const cat = btn.dataset.cat;
-      state.activeCategory = cat;
-      searchAroundMap(cat, true);
+      
+      if (alreadyActive) {
+        state.activeCategory = null;
+        state.markersLayer.clearLayers();
+        document.getElementById('results-panel').classList.remove('open');
+      } else {
+        btn.classList.add('active');
+        const cat = btn.dataset.cat;
+        state.activeCategory = cat;
+        searchAroundMap(cat);
+      }
     });
   });
 
@@ -492,13 +134,271 @@ satBtn.addEventListener('click', toggleSatellite);
     document.getElementById('results-panel').classList.remove('open');
   });
 
-  state.map.on('moveend', () => {
-    if (state.activeCategory) debouncedSearch(state.activeCategory);
-  });
-
-  // Initialisation des nouveaux modules
-  initUrgences();
+  // Initialisation synchronisée de tous les sous-modules
+  initFavorites();
+  initShare();
   initSignalement();
+  initUrgences();
+  initVoiceSearch();
 
+  // Lance une localisation automatique de l'utilisateur au démarrage
   locateUser();
 });
+
+// ---------- Géolocalisation de l'utilisateur ----------
+function locateUser() {
+  if (!navigator.geolocation) {
+    alert("La géolocalisation n'est pas supportée ou activée sur votre appareil.");
+    return;
+  }
+  showLoading(true);
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      showLoading(false);
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+      state.currentPos = { lat, lng };
+
+      // Marqueur stylisé pour la position de l'utilisateur
+      L.marker([lat, lng], {
+        icon: L.divIcon({
+          className: 'custom-user-marker',
+          html: '<div style="background:#2ecc71; width:16px; height:16px; border-radius:50%; border:3px solid white; box-shadow:0 0 8px rgba(0,0,0,0.4);"></div>',
+          iconSize: [16, 16],
+          iconAnchor: [8, 8]
+        })
+      }).addTo(state.map).bindPopup("Vous êtes ici").openPopup();
+
+      state.map.setView([lat, lng], 15);
+
+      if (state.activeCategory) {
+        searchAroundMap(state.activeCategory);
+      }
+    },
+    (error) => {
+      showLoading(false);
+      console.warn("Avis de géolocalisation non disponible : " + error.message);
+    },
+    { enableHighAccuracy: true, timeout: 8000 }
+  );
+}
+
+// ---------- Recherche de Catégorie (Overpass API) ----------
+async function searchAroundMap(category) {
+  if (state.isFetching) return;
+  state.isFetching = true;
+  showLoading(true);
+
+  const bounds = state.map.getBounds();
+  const bbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
+  const tag = CATEGORY_TAGS[category];
+
+  if (!tag) {
+    state.isFetching = false;
+    showLoading(false);
+    return;
+  }
+
+  // Requête Overpass QL optimisée pour l'emprise visuelle actuelle de la carte
+  const query = `[out:json][timeout:25];
+    (
+      node[${tag}](${bbox});
+      way[${tag}](${bbox});
+      relation[${tag}](${bbox});
+    );
+    out center;`;
+
+  // Création d'une clé d'identification simplifiée pour le cache
+  const cacheKey = `${category}_${bounds.getSouth().toFixed(3)}_${bounds.getWest().toFixed(3)}`;
+  const now = Date.now();
+
+  try {
+    if (state.cache[cacheKey] && (now - state.cache[cacheKey].timestamp < CACHE_DURATION)) {
+      renderResults(state.cache[cacheKey].data, category);
+    } else {
+      const response = await fetch(OVERPASS_URL, {
+        method: 'POST',
+        body: `data=${encodeURIComponent(query)}`
+      });
+      const data = await response.json();
+
+      const parsedResults = (data.elements || []).map(item => {
+        const lat = item.lat || (item.center ? item.center.lat : null);
+        const lon = item.lon || (item.center ? item.center.lon : null);
+        return {
+          id: item.id,
+          lat,
+          lon,
+          name: item.tags.name || item.tags.brand || CATEGORY_NAMES[category] || "Établissement",
+          address: item.tags['addr:street'] ? `${item.tags['addr:housenumber'] || ''} ${item.tags['addr:street']}` : 'Adresse non renseignée',
+          phone: item.tags.phone || item.tags['contact:phone'] || null
+        };
+      }).filter(item => item.lat && item.lon);
+
+      state.cache[cacheKey] = { timestamp: now, data: parsedResults };
+      localStorage.setItem('civ_cache', JSON.stringify(state.cache));
+
+      renderResults(parsedResults, category);
+    }
+  } catch (err) {
+    console.error("Erreur serveur Overpass API :", err);
+    alert("Impossible de charger les points d'intérêts sur la zone.");
+  } finally {
+    state.isFetching = false;
+    showLoading(false);
+  }
+}
+
+// ---------- Recherche Textuelle Contextuelle (Nominatim) ----------
+async function handleNaturalSearch(queryText) {
+  showLoading(true);
+  try {
+    // On force la recherche sur la Côte d'Ivoire pour de meilleurs résultats locaux
+    const url = `${NOMINATIM_URL}?format=json&q=${encodeURIComponent(queryText + ', Côte d\'Ivoire')}&limit=5`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data && data.length > 0) {
+      const match = data[0];
+      const lat = parseFloat(match.lat);
+      const lon = parseFloat(match.lon);
+
+      state.map.setView([lat, lon], 14);
+
+      let detectedCat = null;
+      for (const key in CATEGORY_NAMES) {
+        if (queryText.toLowerCase().includes(key) || queryText.toLowerCase().includes(CATEGORY_NAMES[key].toLowerCase())) {
+          detectedCat = key;
+          break;
+        }
+      }
+
+      if (detectedCat) {
+        document.querySelectorAll('.cat-btn').forEach(b => {
+          if (b.dataset.cat === detectedCat) b.classList.add('active');
+          else b.classList.remove('active');
+        });
+        state.activeCategory = detectedCat;
+        searchAroundMap(detectedCat);
+      } else {
+        state.markersLayer.clearLayers();
+        L.marker([lat, lon]).addTo(state.markersLayer)
+          .bindPopup(`<b>${escapeHtml(match.display_name)}</b>`)
+          .openPopup();
+      }
+    } else {
+      alert("Aucun lieu trouvé correspondant à votre saisie.");
+    }
+  } catch (err) {
+    console.error("Erreur d'appel Nominatim :", err);
+    alert("Erreur technique lors de la recherche textuelle.");
+  } finally {
+    showLoading(false);
+  }
+}
+
+// ---------- Rendu Graphique des Marqueurs et Cartes ----------
+function renderResults(places, category) {
+  state.markersLayer.clearLayers();
+  state.results = places;
+
+  const listEl = document.getElementById('results-list');
+  listEl.innerHTML = '';
+
+  if (places.length === 0) {
+    listEl.innerHTML = '<p style="padding:20px; text-align:center; color:#888;">Aucun résultat trouvé sur ce périmètre.</p>';
+    document.getElementById('results-panel').classList.add('open');
+    return;
+  }
+
+  // Calcul des distances à la ronde via formule Haversine si position connue
+  if (state.currentPos) {
+    places.forEach(p => { p.distance = haversine(state.currentPos, p); });
+    places.sort((a, b) => a.distance - b.distance);
+  }
+
+  places.slice(0, MAX_RESULTS).forEach(place => {
+    const marker = L.marker([place.lat, place.lon]).addTo(state.markersLayer);
+    
+    const popupHTML = `
+      <div style="font-family:sans-serif; min-width:150px; padding:2px;">
+        <b style="color:#2c3e50; font-size:14px;">${escapeHtml(place.name)}</b><br>
+        <span style="color:#777; font-size:11px;">${escapeHtml(place.address)}</span><br>
+        ${place.distance ? `<strong style="color:#e67e22; font-size:12px;">📍 ${place.distance.toFixed(2)} km</strong><br>` : ''}
+        <button onclick="window.startRouting(${place.lat}, ${place.lon})" style="margin-top:8px; width:100%; padding:6px; background:#2c3e50; color:white; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">Itinéraire</button>
+      </div>
+    `;
+    marker.bindPopup(popupHTML);
+
+    const isFav = state.favs.some(f => f.id === place.id);
+    const card = document.createElement('div');
+    card.className = 'result-card';
+    card.innerHTML = `
+      <strong>${escapeHtml(place.name)}</strong>
+      <p><i class="fas fa-map-marker-alt" style="color:#e74c3c;"></i> ${escapeHtml(place.address)} ${place.distance ? `(${place.distance.toFixed(2)} km)` : ''}</p>
+      <div class="result-actions">
+        <button class="btn-go"><i class="fas fa-crosshairs"></i> Voir</button>
+        ${place.phone ? `<a class="btn-call" href="tel:${place.phone}"><i class="fas fa-phone"></i> Appeler</a>` : ''}
+        <button class="btn-fav" style="background: ${isFav ? '#d35400' : '#f1c40f'}">
+          <i class="fas fa-star"></i> ${isFav ? 'Retirer' : 'Favori'}
+        </button>
+        <button class="btn-share"><i class="fas fa-share-alt"></i> Partager</button>
+      </div>
+    `;
+
+    // Événements liés à la carte de résultat
+    card.querySelector('.btn-go').addEventListener('click', () => {
+      state.map.setView([place.lat, place.lon], 17);
+      marker.openPopup();
+    });
+
+    card.querySelector('.btn-fav').addEventListener('click', (e) => {
+      toggleFav(place.id, place.lat, place.lon, place.name);
+      const currentlyFav = state.favs.some(f => f.id === place.id);
+      e.currentTarget.style.background = currentlyFav ? '#d35400' : '#f1c40f';
+      e.currentTarget.innerHTML = `<i class="fas fa-star"></i> ${currentlyFav ? 'Retirer' : 'Favori'}`;
+    });
+
+    card.querySelector('.btn-share').addEventListener('click', () => {
+      if (window.sharePlace) window.sharePlace(place.name, place.lat, place.lon);
+    });
+
+    listEl.appendChild(card);
+  });
+
+  document.getElementById('results-panel').classList.add('open');
+}
+
+// ---------- Calcul d'Itinéraire OSRM Déporté ----------
+window.startRouting = function(endLat, endLon) {
+  if (!state.currentPos) {
+    alert("Veuillez autoriser et activer votre géolocalisation pour générer un itinéraire.");
+    return;
+  }
+  showRoute(state.map, state.currentPos.lat, state.currentPos.lng, endLat, endLon);
+};
+
+// ---------- Formule Mathématique de Haversine ----------
+function haversine(coord1, place) {
+  const R = 6371; // Rayon moyen de la terre en kilomètres
+  const dLat = (place.lat - coord1.lat) * Math.PI / 180;
+  const dLon = (place.lon - coord1.lng) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(coord1.lat * Math.PI / 180) * Math.cos(place.lat * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+// ---------- Gestion des favoris synchronisés ----------
+function toggleFav(id, lat, lon, name) {
+  const idx = state.favs.findIndex(f => f.id === id);
+  if (idx >= 0) {
+    state.favs.splice(idx, 1);
+  } else {
+    state.favs.push({ id, lat, lon, name });
+  }
+  localStorage.setItem('civ_favs', JSON.stringify(state.favs));
+  // Dispatch un événement de stockage natif pour alerter d'autres modules si nécessaire
+  window.dispatchEvent(new Event('storage'));
+}
