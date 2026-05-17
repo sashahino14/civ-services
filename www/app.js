@@ -25,22 +25,29 @@ export const state = {
 };
 
 // ---------- Mappage catégories OpenStreetMap ----------
+// FIX BUG#4 : La catégorie "public" utilisait une syntaxe Overpass QL invalide :
+//   "(amenity=public_building or office=government)" ne peut pas être injecté directement
+//   comme filtre de tag dans [tag](bbox). La solution est de stocker un tableau de filtres
+//   et de construire plusieurs blocs node/way/relation dans le query-builder.
+//
+// Chaque entrée est un tableau de paires [key, value].
+// Pour les regex Overpass, préfixer la valeur avec "~" : ["shop", "~.*"]
 const CATEGORY_TAGS = {
-  hospital: 'amenity=hospital',
-  pharmacy: 'amenity=pharmacy',
-  school: 'amenity=school',
-  fuel: 'amenity=fuel',
-  market: 'shop~".*"', // Récupère tous les types de commerces
-  public: '(amenity=public_building or office=government)'
+  hospital: [['amenity', 'hospital']],
+  pharmacy: [['amenity', 'pharmacy']],
+  school:   [['amenity', 'school']],
+  fuel:     [['amenity', 'fuel']],
+  market:   [['shop', '~.*']],          // Tous les types de commerces (regex)
+  public:   [['amenity', 'public_building'], ['office', 'government']] // Multi-filtres
 };
 
 const CATEGORY_NAMES = {
   hospital: 'Hôpital / Centre de santé',
   pharmacy: 'Pharmacie',
-  school: 'Établissement scolaire',
-  fuel: 'Station-service',
-  market: 'Commerce / Marché',
-  public: 'Administration public'
+  school:   'Établissement scolaire',
+  fuel:     'Station-service',
+  market:   'Commerce / Marché',
+  public:   'Administration publique'
 };
 
 // ---------- Utilitaires de l'interface utilisateur ----------
@@ -52,21 +59,45 @@ function showLoading(show) {
   }
 }
 
-function escapeHtml(text) {
+// FIX WARN#9 : escapeHtml est maintenant exporté proprement depuis ce module
+// pour être importé par favorites.js au lieu d'être exposé via window.*
+export function escapeHtml(text) {
   if (!text) return '';
   const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
   return text.replace(/[&<>"']/g, m => map[m]);
 }
-// Rendre escapeHtml accessible aux autres modules distants
-window.escapeHtml = escapeHtml;
+
+// ---------- Construction de la requête Overpass QL (query-builder) ----------
+// FIX BUG#4 : Génère proprement une requête valide pour 1 ou plusieurs filtres de tags
+function buildOverpassQuery(tagFilters, bbox) {
+  const lines = tagFilters.flatMap(([key, value]) => {
+    // Si la valeur commence par "~", c'est un filtre regex Overpass
+    const filter = value.startsWith('~')
+      ? `["${key}"~"${value.slice(1)}"]`
+      : `["${key}"="${value}"]`;
+    return [
+      `  node${filter}(${bbox});`,
+      `  way${filter}(${bbox});`,
+      `  relation${filter}(${bbox});`
+    ];
+  });
+  return `[out:json][timeout:25];\n(\n${lines.join('\n')}\n);\nout center;`;
+}
 
 // ---------- Initialisation au chargement du DOM ----------
 document.addEventListener('DOMContentLoaded', () => {
   // Coordonnées par défaut (Abidjan, Côte d'Ivoire)
   state.map = L.map('map', { zoomControl: false }).setView([5.359952, -4.008256], 13);
-  
+
   // Rendre la carte globale pour les modules dépendants (ex: favorites.js)
   window.map = state.map;
+
+  // FIX BUG#3 (RÈGLE D'OR) : invalidateSize() obligatoire après init Leaflet sur Android
+  // La WebView Android ne stabilise pas la taille de l'écran immédiatement au chargement.
+  // Sans ce délai, la carte s'affiche sous forme de bloc gris vide.
+  setTimeout(() => {
+    if (state.map) state.map.invalidateSize();
+  }, 350);
 
   // Contrôle du zoom positionné en bas à gauche pour laisser la place aux boutons mobiles
   L.control.zoom({ position: 'bottomleft' }).addTo(state.map);
@@ -78,11 +109,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }).addTo(state.map);
 
   // Couche satellite (Esri World Imagery)
-  const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    attribution: 'Tiles © Esri'
-  });
+  const satelliteLayer = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Tiles © Esri' }
+  );
 
-  // Gestion du basculement satellite
+  // FIX BUG#1 : satellite-btn existe maintenant dans le HTML, cet addEventListener ne crashe plus
   let isSatellite = false;
   document.getElementById('satellite-btn').addEventListener('click', () => {
     if (isSatellite) {
@@ -101,7 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Assignation des écouteurs d'événements principaux
   document.getElementById('locate-btn').addEventListener('click', locateUser);
-  
+
   document.getElementById('search-btn').addEventListener('click', () => {
     const query = document.getElementById('search-input').value.trim();
     if (query) handleNaturalSearch(query);
@@ -116,7 +148,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', () => {
       const alreadyActive = btn.classList.contains('active');
       document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
-      
+
       if (alreadyActive) {
         state.activeCategory = null;
         state.markersLayer.clearLayers();
@@ -171,6 +203,9 @@ function locateUser() {
 
       state.map.setView([lat, lng], 15);
 
+      // FIX BUG#3 (RÈGLE D'OR) : Forcer le recalcul après setView() déclenché par géoloc
+      setTimeout(() => { if (state.map) state.map.invalidateSize(); }, 350);
+
       if (state.activeCategory) {
         searchAroundMap(state.activeCategory);
       }
@@ -191,24 +226,18 @@ async function searchAroundMap(category) {
 
   const bounds = state.map.getBounds();
   const bbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
-  const tag = CATEGORY_TAGS[category];
+  const tagFilters = CATEGORY_TAGS[category];
 
-  if (!tag) {
+  if (!tagFilters) {
     state.isFetching = false;
     showLoading(false);
     return;
   }
 
-  // Requête Overpass QL optimisée pour l'emprise visuelle actuelle de la carte
-  const query = `[out:json][timeout:25];
-    (
-      node[${tag}](${bbox});
-      way[${tag}](${bbox});
-      relation[${tag}](${bbox});
-    );
-    out center;`;
+  // FIX BUG#4 : Utilisation du query-builder pour générer une requête QL valide
+  const query = buildOverpassQuery(tagFilters, bbox);
 
-  // Création d'une clé d'identification simplifiée pour le cache
+  // Clé de cache simplifiée sur la zone et la catégorie
   const cacheKey = `${category}_${bounds.getSouth().toFixed(3)}_${bounds.getWest().toFixed(3)}`;
   const now = Date.now();
 
@@ -229,8 +258,10 @@ async function searchAroundMap(category) {
           id: item.id,
           lat,
           lon,
-          name: item.tags.name || item.tags.brand || CATEGORY_NAMES[category] || "Établissement",
-          address: item.tags['addr:street'] ? `${item.tags['addr:housenumber'] || ''} ${item.tags['addr:street']}` : 'Adresse non renseignée',
+          name: item.tags.name || item.tags.brand || CATEGORY_NAMES[category] || 'Établissement',
+          address: item.tags['addr:street']
+            ? `${item.tags['addr:housenumber'] || ''} ${item.tags['addr:street']}`.trim()
+            : 'Adresse non renseignée',
           phone: item.tags.phone || item.tags['contact:phone'] || null
         };
       }).filter(item => item.lat && item.lon);
@@ -254,7 +285,7 @@ async function handleNaturalSearch(queryText) {
   showLoading(true);
   try {
     // On force la recherche sur la Côte d'Ivoire pour de meilleurs résultats locaux
-    const url = `${NOMINATIM_URL}?format=json&q=${encodeURIComponent(queryText + ', Côte d\'Ivoire')}&limit=5`;
+    const url = `${NOMINATIM_URL}?format=json&q=${encodeURIComponent(queryText + ", Côte d'Ivoire")}&limit=5`;
     const response = await fetch(url);
     const data = await response.json();
 
@@ -264,10 +295,14 @@ async function handleNaturalSearch(queryText) {
       const lon = parseFloat(match.lon);
 
       state.map.setView([lat, lon], 14);
+      setTimeout(() => { if (state.map) state.map.invalidateSize(); }, 350);
 
       let detectedCat = null;
       for (const key in CATEGORY_NAMES) {
-        if (queryText.toLowerCase().includes(key) || queryText.toLowerCase().includes(CATEGORY_NAMES[key].toLowerCase())) {
+        if (
+          queryText.toLowerCase().includes(key) ||
+          queryText.toLowerCase().includes(CATEGORY_NAMES[key].toLowerCase())
+        ) {
           detectedCat = key;
           break;
         }
@@ -275,8 +310,7 @@ async function handleNaturalSearch(queryText) {
 
       if (detectedCat) {
         document.querySelectorAll('.cat-btn').forEach(b => {
-          if (b.dataset.cat === detectedCat) b.classList.add('active');
-          else b.classList.remove('active');
+          b.classList.toggle('active', b.dataset.cat === detectedCat);
         });
         state.activeCategory = detectedCat;
         searchAroundMap(detectedCat);
@@ -311,7 +345,7 @@ function renderResults(places, category) {
     return;
   }
 
-  // Calcul des distances à la ronde via formule Haversine si position connue
+  // Calcul des distances via formule Haversine si position connue
   if (state.currentPos) {
     places.forEach(p => { p.distance = haversine(state.currentPos, p); });
     places.sort((a, b) => a.distance - b.distance);
@@ -319,7 +353,7 @@ function renderResults(places, category) {
 
   places.slice(0, MAX_RESULTS).forEach(place => {
     const marker = L.marker([place.lat, place.lon]).addTo(state.markersLayer);
-    
+
     const popupHTML = `
       <div style="font-family:sans-serif; min-width:150px; padding:2px;">
         <b style="color:#2c3e50; font-size:14px;">${escapeHtml(place.name)}</b><br>
@@ -335,7 +369,11 @@ function renderResults(places, category) {
     card.className = 'result-card';
     card.innerHTML = `
       <strong>${escapeHtml(place.name)}</strong>
-      <p><i class="fas fa-map-marker-alt" style="color:#e74c3c;"></i> ${escapeHtml(place.address)} ${place.distance ? `(${place.distance.toFixed(2)} km)` : ''}</p>
+      <p>
+        <i class="fas fa-map-marker-alt" style="color:#e74c3c;"></i>
+        ${escapeHtml(place.address)}
+        ${place.distance ? `(${place.distance.toFixed(2)} km)` : ''}
+      </p>
       <div class="result-actions">
         <button class="btn-go"><i class="fas fa-crosshairs"></i> Voir</button>
         ${place.phone ? `<a class="btn-call" href="tel:${place.phone}"><i class="fas fa-phone"></i> Appeler</a>` : ''}
@@ -346,7 +384,6 @@ function renderResults(places, category) {
       </div>
     `;
 
-    // Événements liés à la carte de résultat
     card.querySelector('.btn-go').addEventListener('click', () => {
       state.map.setView([place.lat, place.lon], 17);
       marker.openPopup();
@@ -380,14 +417,14 @@ window.startRouting = function(endLat, endLon) {
 
 // ---------- Formule Mathématique de Haversine ----------
 function haversine(coord1, place) {
-  const R = 6371; // Rayon moyen de la terre en kilomètres
+  const R = 6371;
   const dLat = (place.lat - coord1.lat) * Math.PI / 180;
   const dLon = (place.lon - coord1.lng) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(coord1.lat * Math.PI / 180) * Math.cos(place.lat * Math.PI / 180) *
-            Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(coord1.lat * Math.PI / 180) * Math.cos(place.lat * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 // ---------- Gestion des favoris synchronisés ----------
@@ -399,6 +436,9 @@ function toggleFav(id, lat, lon, name) {
     state.favs.push({ id, lat, lon, name });
   }
   localStorage.setItem('civ_favs', JSON.stringify(state.favs));
-  // Dispatch un événement de stockage natif pour alerter d'autres modules si nécessaire
-  window.dispatchEvent(new Event('storage'));
+
+  // FIX BUG#5 : On dispatch un CustomEvent nommé au lieu de new Event('storage').
+  // new Event('storage') ne transporte pas de propriété "key", donc la vérification
+  // if (e.key === 'civ_favs') dans favorites.js était toujours false → pas de rafraîchissement.
+  window.dispatchEvent(new CustomEvent('favsUpdated'));
 }
