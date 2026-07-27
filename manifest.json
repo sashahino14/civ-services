@@ -1,0 +1,23 @@
+{
+  "name": "CIV Services",
+  "short_name": "CIV Services",
+  "description": "Trouvez rapidement tous les services utiles en Côte d'Ivoire.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0a7e3d",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ],
+  "splash_pages": null
+}
