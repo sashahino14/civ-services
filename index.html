@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+    <meta name="theme-color" content="#0a7e3d">
+    <meta name="description" content="CIV Services – Trouvez rapidement tous les services utiles en Côte d'Ivoire.">
+    <title>CIV Services</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin=""/>
+    <!-- Font Awesome 6 (Free) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- Manifest PWA -->
+    <link rel="manifest" href="manifest.json">
+    <!-- Favicon (votre icon.png) -->
+    <link rel="icon" href="icon.png" sizes="any" type="image/png">
+    <!-- Styles principaux -->
+    <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+    <!-- Conteneur principal -->
+    <div id="app">
+        
+        <!-- En-tête avec votre logo -->
+        <header id="app-header">
+            <img src="logo.png" alt="CIV Services" id="app-logo">
+        </header>
+
+        <!-- Écran d'accueil / Carte -->
+        <div id="map-container"></div>
+
+        <!-- Bouton d'urgence flottant -->
+        <button id="emergency-btn" aria-label="Urgence">
+            <i class="fas fa-phone-alt"></i>
+        </button>
+
+        <!-- Barre de navigation inférieure -->
+        <nav id="bottom-nav">
+            <button class="nav-item active" data-screen="home">
+                <span class="nav-icon"><i class="fas fa-home"></i></span>
+                <span class="nav-label">Accueil</span>
+            </button>
+            <button class="nav-item" data-screen="map">
+                <span class="nav-icon"><i class="fas fa-map-location-dot"></i></span>
+                <span class="nav-label">Carte</span>
+            </button>
+            <button class="nav-item" data-screen="emergency">
+                <span class="nav-icon"><i class="fas fa-triangle-exclamation"></i></span>
+                <span class="nav-label">Urgence</span>
+            </button>
+            <button class="nav-item" data-screen="favorites">
+                <span class="nav-icon"><i class="fas fa-star"></i></span>
+                <span class="nav-label">Favoris</span>
+            </button>
+        </nav>
+
+        <!-- Modale d'urgence -->
+        <div id="emergency-modal" class="modal hidden">
+            <div class="modal-content">
+                <button id="emergency-close" class="modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+                <h2><i class="fas fa-phone-alt" style="margin-right: 8px;"></i>Numéros d'urgence</h2>
+                <ul id="emergency-list"></ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+    <!-- Module principal -->
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
