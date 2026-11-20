@@ -1,0 +1,11 @@
+{
+  "name": "civ-services",
+  "version": "1.0.0",
+  "description": "Services en Côte d'Ivoire",
+  "scripts": {
+    "build": "esbuild js/main.js --bundle --outfile=www/js/bundle.js --minify"
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.0"
+  }
+}

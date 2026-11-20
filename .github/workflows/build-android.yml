@@ -1,0 +1,62 @@
+name: Build Android Test APK
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Setup Java JDK
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Install dependencies & Bundle JS
+      run: |
+        npm install
+        npm run build
+
+    - name: Prepare www directory
+      run: |
+        mkdir -p www
+        cp index.html manifest.json www/
+        cp -r css www/
+        cp -r js www/
+        cp icon.png logo.png www/ 2>/dev/null || true
+        # Remplacement du script module par le bundle généré par esbuild
+        sed -i 's|<script type="module" src="js/main.js"></script>|<script src="js/bundle.js"></script>|g' www/index.html
+
+    - name: Install Cordova
+      run: npm install -g cordova
+
+    - name: Create Cordova Project & Build APK
+      run: |
+        cordova create cordova-app com.civ.services "CIV Services"
+        cd cordova-app
+        rm -rf www/*
+        cp -r ../www/* www/
+        cordova platform add android
+        # Génération de l'APK en mode Debug (parfait pour tester)
+        cordova build android --debug
+
+    - name: Upload Test APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: CIV-Services-Test-APK
+        path: cordova-app/platforms/android/app/build/outputs/apk/debug/*.apk
