@@ -24,9 +24,6 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
-
     - name: Install dependencies & Bundle JS
       run: |
         npm install
@@ -52,7 +49,7 @@ jobs:
         rm -rf www/*
         cp -r ../www/* www/
         cordova platform add android
-        # Génération de l'APK en mode Debug (parfait pour tester)
+        # Cordova va télécharger automatiquement le SDK Android nécessaire
         cordova build android --debug
 
     - name: Upload Test APK
